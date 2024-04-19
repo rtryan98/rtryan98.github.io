@@ -1,0 +1,22 @@
+\documentclass[tikz,border=10pt]{standalone}
+\usepackage{lmodern}
+\usepackage{pgfplots}
+\usetikzlibrary {datavisualization.formats.functions}
+\begin{document}
+\begin{tikzpicture}[scale=1.5,
+	font=\sffamily,
+    declare function={f1(\x)=1.0*sin(deg(\x));}]
+	\draw[latex-latex](0,2.25)  node[right]{elevation} |- (8.5,0);
+	\draw plot[domain=0:8.45,variable=\x,samples=62,smooth] ({\x},{f1(\x)});
+	\node at (pi * 0.5, 1.25) {crest};
+	\node at (pi * 0.5, -0.25) {amplitude};
+	\node at (pi * 1.5, -1.25) {through};
+	\node at (pi * 1.5, 1.25) {wavelength $\lambda$};
+	\node[draw,circle, fill=black, minimum size=0.15cm, inner sep=0pt] (crest) at (pi * 0.5,  1) {};
+	\node[draw,circle, fill=black, minimum size=0.15cm, inner sep=0pt] (below_crest) at (pi * 0.5,  0) {};
+	\node[draw,circle, fill=black, minimum size=0.15cm, inner sep=0pt] (crest_wavelength) at (pi * 2.5,  1) {};
+	\node[draw,circle, fill=black, minimum size=0.15cm, inner sep=0pt] at (pi * 1.5, -1) {};
+	\draw[dashed] (crest) |- (crest_wavelength);
+	\draw[dashed] (below_crest) |- (crest);
+\end{tikzpicture}
+\end{document}
