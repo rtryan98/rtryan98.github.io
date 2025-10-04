@@ -1,0 +1,2 @@
+{"rule":"MORFOLOGIK_RULE_EN_US","sentence":"^\\QBecause there aren't any tesselation or geometry shaders to be found anywhere in this renderer, the only candidate left is VPC, which is responsible for clip and cull.\\E$"}
+{"rule":"ANYWAYS","sentence":"^\\QScaling it up\nDespite the previously found bottleneck in the World Pipe, I'll continue anyways by scaling the ocean up.\\E$"}
