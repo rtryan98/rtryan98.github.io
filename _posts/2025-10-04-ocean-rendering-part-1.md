@@ -374,7 +374,7 @@ This is an improvement that I still have to add in my implementation.
 **Fast Fourier Transform**:\\
 As for the FFT itself, my HLSL implementation can be found [here](https://github.com/rtryan98/renderer/blob/231037ba920f71a37f0e598dd7ec520f688fda74/assets/shaders/fft.cs.hlsl).
 You should be able to just copy it and just change up some bindings and includes, as well as the defines.
-To use it, just call your API's `dispatch(1, texture_size, 1)`.
+To use it, just call your API's `dispatch(1, texture_size, 1)` twice, once for the horizontal FFT and once for the vertical FFT.
 On top of that, operates in-place, so no additional textures are required for it.
 It's plenty fast enough so it doesn't cost too much frame time, though I am sure that some improvements could still be made.
 
