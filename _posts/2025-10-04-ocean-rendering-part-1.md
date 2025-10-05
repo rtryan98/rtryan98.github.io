@@ -20,7 +20,7 @@ In this post I will go through the theory and mathematics of implementing an oce
   - [Non-Directional Oceanographic Spectra](#non-directional-oceanographic-spectra)
   - [Directional Spreading Function](#directional-spreading-function)
   - [Spectral Synthesis](#spectral-synthesis)
-- [Fast Fourier Transform](#fast-fourier-transform)
+- [Fourier Transform](#fourier-transform)
 - [Shading](#shading)
 - [Implementation Walkthrough](#implementation-walkthrough)
   - [Cascades](#cascades)
@@ -33,25 +33,39 @@ In this post I will go through the theory and mathematics of implementing an oce
   - [A3: Directional Spreading Functions](#a3-directional-spreading-functions)
 
 ## Introduction
+\[Tessendorf 2001\]'s *Simulating Ocean Water* might be one of the more famous papers known in the graphics space.
+His work serves as the basis for any Fast Fourier Transform based ocean simulation in computer graphics.
+However, given the age of the paper, several improvements have been made.
+In this blog post, I'll to go through the theory, the mathematics, and the process of implementing an ocean simulation using a somewhat more modern approach.
+
 For the sake of brevity, I'll skip simpler procedural wave techniques such as sum of sines or plain [trochoidal or Gerstner waves](https://en.wikipedia.org/wiki/Trochoidal_wave) because their formulations lack relevance to implementing an FFT ocean simulation.
 It's important to note, however, that the result of an FFT ocean simulation is technically the same result as if adding up tons of Gerstner waves than GPUs could handle in a single rendered frame at >60fps.
-Because this topic is deeper than the Mariana Trench, and because I am not an oceanographer, I'll try to be as concise as possible whilst keeping the most important information.
-[Ocean waves simulation with Fast Fourier transform \[Pensionerov 2020\]](https://www.youtube.com/watch?v=kGEqaX4Y4bQ) made a great overview of the technique itself and I highly recommend you to watch his work!
+Because this topic is deeper than the Mariana Trench, and because I am not an oceanographer, I'll try to be as concise as possible whilst keeping the most essential information.
+Furthermore, [Ocean waves simulation with Fast Fourier transform \[Pensionerov 2020\]](https://www.youtube.com/watch?v=kGEqaX4Y4bQ) made a great overview of the technique itself and I highly recommend you to watch his work!
+Additionally, if you're more of a code-person, Gikster's [Oceans: Theory to Implementation](https://gikster.dev/posts/Ocean-Simulation/) may be more up your alley.
+I felt there was a small lack of accessible resources for actually understanding the processes behind ocean simulation and what the formulae mean, so with this post, I want to add another resource for people interested in implementing an ocean simulation.
+With this being said, I hope I can make the topic justice.
+In a way, it's actually quite funny.
+I'm a graphics programmer and during research for this topic I've gone neck-deep into oceanographic literature that otherwise has nothing to do with graphics.
 
-A small note on the structure of this blog post: Because most of the math can be directly translated to shader code, I've decided to omit code snippets unless they're absolutely necessary to understand this topic.
-My own implementation, as of now, can be found [in my renderer's GitHub repository](https://github.com/rtryan98/renderer/tree/b432b054b9734f55b924c25582b085f319c94db7).
+A small note on the structure of this blog post: Because most of the math can be directly translated to shader code, I've decided to omit full code snippets and instead opted to use pseudocode.
+My own implementation, as of now, can be found [in my renderer's GitHub repository](https://github.com/rtryan98/renderer).
+Further references would be [Ocean URP](https://github.com/gasgiant/Ocean-URP), which is the continued implementation of \[Pensionerov 2020\], and [EncinoWaves](https://github.com/blackencino/EncinoWaves), which is the reference implementation of \[Horvath 2015\].
 
 #### Algorithm Walkthrough
+First and foremost, most of the meat of this algorithm is done in *Fourier space*, or *spectral space*, depending on how you want to call it.
+In Fourier space, we don't have any spatial information.
+Instead, we have *frequencies*, constructed as complex values representing *amplitude* and *phase*.
+
 The structure of the ocean surface simulation pipeline is split up into the following parts:
-1. Generate an initial *oceanographic spectrum* in a compute shader and store the results into a texture.
-2. Given the oceanographic spectrum, compute the *time-dependent oceanographic spectrum*.
-    1. Compute the partial derivatives required for horizontal displacement and to acquire normal vectors.
-    2. Store the developed spectrum and its partial derivatives in other textures.
-3. Compute the inverse Fast-Fourier-Transform of the newly stored textures.
+1. Generate an initial *oceanographic spectrum* in a compute shader.
+2. Given the oceanographic spectrum, calculate the *time-dependent oceanographic spectrum* and compute the spectrum of the surface displacement and its partial derivatives.
+3. Compute the inverse Fourier transform of the displacement and partial derivative spectra, yielding their spatial values.
 
 Yes, that's really it for the simulation.
+In a way, the first two steps can be though of as creating a set of inputs one would use to calculate Gerstner waves, with the inverse Fourier transform being the summation of those waves.
 Even though those are just this few it took me a lot of time to achieve a proper result.
-Either way, in the next chapters I'll go over some theory and the mathematics required to implement the ocean surface simulation.
+The next chapters will go over some theory and the mathematics required to implement the ocean surface simulation.
 
 #### Parameters and Notation
 A small list of the parameters and their notation that'll be used in here:
@@ -66,10 +80,17 @@ A small list of the parameters and their notation that'll be used in here:
 ## Oceanographic Spectra
 To accurately describe the motion of ocean waves, several mathematical models were derived from empirical studies.
 I'll mainly focus on the TMA-Spectrum for the non-directional spectrum as well as the Donelan-Banner directional spreading function.
-More information on those and other spectra are presented in \[Horvath 2015\].
 A full spectrum $$ S(\omega,\theta) $$ is given in terms of angular frequency $$ \omega $$ and angle $$ \theta $$ of the wave vector $$\hat{k}$$.
 To calculate the spectrum, we need to first acquire the angular frequency and angle for any given wave vector.
 The former is provided by the *dispersion relationship*, the latter is simply the angle between $$\hat{k}_x$$ and $$\hat{k}_y$$, which is calculated as $$\text{atan2}(\hat{k}_y, \hat{k}_x)$$.
+
+For the people interested in how those spectra are created:
+oceanographic spectra themselves are essentially statistical models that are derived from measuring the wave amplitudes over time at a given location.
+Usually this also has various conditions that must be met, like having a roughly constant wind speed and wind direction over some duration.
+A wave spectrum actually is never fully developed, so the Phillips spectrum, which is used in \[Tessendorf 2001\] and as such is quite commonly used in other ocean simulation implementations, is rather inaccurate.
+The constants that are used in the JONSWAP spectrum and in other spectra are generally just derived by experiments in open water.
+Such spectra are created primarily for engineering purposes, such as designing ships or oil platforms.
+However, we're here to do something far more important than designing some ship: we're making pixels light up in fancy ways.
 
 #### Dispersion Relationship
 A dispersion relationship describes the angular frequency of any given wavenumber $$k$$.
@@ -82,7 +103,7 @@ For further calculations, we'll also need its derivative $$\frac{d}{dk}\omega(k)
 
 $$\frac{d}{dk}\omega(k)_\text{finite-depth}=\frac{g \cdot ( \tanh(kh) + kh \cdot \text{sech}^2(kh) )}{2 \sqrt{gk \cdot \tanh(kh)}}$$
 
-As a sidenote: to maintain precision, $$\text{sech}$$ may be implemented as follows: $$\text{sech}(\text{clamp}(x, -9, 9)) \approx \text{sech}(x) = \frac{1}{\cosh(x)}$$.
+To maintain precision, $$\text{sech}$$ may be implemented as follows: $$\text{sech}(\text{clamp}(x, -9, 9)) \approx \text{sech}(x) = \frac{1}{\cosh(x)}$$.
 
 #### Non-Directional Oceanographic Spectra
 The next piece of the puzzle is the non-directional oceanographic spectrum $$S(\omega)$$.
@@ -106,7 +127,7 @@ r &= \exp\left(-\frac{(\omega - \omega_p)^2}{2\sigma^2\omega_p^2}\right) \\
 
 A small note: the so-called peak-enhancement factor $$\gamma$$ may be modified.
 Some oceanographic literature suggest values between 1 and 2, which better match different sea states.
-Using a value of 1 will cause the JONSWAP spectrum to converge to a Pierson-Moskowitz spectrum, which is shown in [Appendix A2](#a2-non-directional-oceanographic-spectra).
+Using a value of 1 will cause the JONSWAP spectrum to converge to a Pierson-Moskowitz spectrum, which is shown alongside a plethora of different spectra in [Appendix A2](#a2-non-directional-oceanographic-spectra).
 
 The Texel-MARSEN-ARSLOE (TMA) spectrum is given as a modification of the JONSWAP spectrum, with the purpose of enhancing the accuracy when utilizing the JONSWAP spectrum for shallow waters.
 This modification is given as a simple multiplication with the Kitaigorodskii depth attenuation function $$\phi(\omega, h)$$, which is approximated by:
@@ -117,6 +138,10 @@ $$\begin{align*}
 \end{align*}$$
 
 Which gives us the TMA spectrum: $$S_\text{TMA}(\omega) = S_\text{JONSWAP}(\omega)\phi(\omega, h)$$.
+
+A spectrum may be double peaked, meaning there are two local peak frequencies.
+Such a double peaked spectrum is easily achievable by simply adding two spectra with different physical parameters, such as the wind speed.
+One use case for this would be to have different parameterizations for waves that are produced locally, by using a lower fetch value, and waves that are generated further away, which have a high fetch value.
 
 #### Directional Spreading Function
 Finally, we arrive at the last piece before we can produce the full ocean spectrum.
@@ -154,7 +179,8 @@ Furthermore, given any two directional spreading functions $$D_1$$ and $$D_2$$, 
 #### Spectral Synthesis
 Now that we have the non-directional oceanographic spectrum and the directional spreading function, we can combine both into the directional spectrum $$S(\omega, \theta) = S(\omega)D(\omega, \theta)$$.
 However, there's a problem: the spectrum is given in terms of $$\omega$$ and $$\theta$$, and in the FFT we'll be integrating over the wave vector $$\hat{k}$$, meaning the spectrum must be reformulated to account for this.
-This change of variables gives us $$S(\hat{k}_x, \hat{k}_y) = S(\omega,\theta)\frac{d\omega}{dk}/k$$, which is also why we needed to calculate the derivative of the dispersion relationship. For the derivation refer to \[Horvath 2015\].
+This change of variables gives us $$S(\hat{k}_x, \hat{k}_y) = S(\omega,\theta)\frac{d\omega}{dk}/k$$, which is also why we needed to calculate the derivative of the dispersion relationship.
+For the full derivation, refer to \[Horvath 2015\].
 Using this, we can calculate the mean wave amplitude $$\overline{a}$$:
 
 $$\overline{a}(\hat{k}_x, \hat{k}_y, \Delta \hat{k}_x, \Delta \hat{k}_y) = \sqrt{2S(\hat{k}_x, \hat{k}_y)\Delta \hat{k}_x\Delta \hat{k}_y}$$
@@ -192,15 +218,14 @@ $$\begin{align*}
 If you look closely, you'll notice that $$\mathcal{F}(\partial\eta_y/\partial x)=\mathcal{F}(\partial\eta_x/\partial y)$$, meaning we only need to compute and store one of those partial derivatives.
 Once that is done, the only thing left is to put them through the FFT giving us the ocean surface displacement as well as every required partial derivative required for shading!
 
-## Fast Fourier Transform
-I'll skip a length explanation of how the Fourier Transform itself or the FFT works.
+## Fourier Transform
+I'll skip a length explanation of how the Fourier Transform itself works, as that would make this already long blog post explode in size.
 However, there is a very important property that we'll make use of: a function $$ f $$ is real-valued if and only if the Fourier transform of $$ f $$ is Hermitian.
 Because our outputs are all real-valued, we know that our spectrum must be Hermitian.
 Given two Hermitian functions $$ f, g $$, then $$ \mathcal{F}^{-1}(\mathcal{F}(f) + i\mathcal{F}(g)) = f + ig$$.
 In words: we can calculate the inverse Fourier Transform of two functions at the same time.
 This is a common trick in signal processing, and we'll make good use of it here.
 Instead of calculating the inverse Fourier Transform for every value individually, we can halve the amount of FFTs we actually have to compute.
-As for the FFT itself, my HLSL implementation can be found here: [\[Code\]](https://github.com/rtryan98/renderer/blob/231037ba920f71a37f0e598dd7ec520f688fda74/assets/shaders/fft.cs.hlsl).
 
 ## Shading
 Now to the final part of plain theory and mathematics: the shading.
@@ -221,12 +246,12 @@ $$\begin{align*}
   \frac{
   \frac{\partial\eta_z(\boldsymbol{x})}{\partial x}
   }{
-  1 + \frac{\partial \eta_x(\boldsymbol{x})}{\partial x}
+  |1 + \frac{\partial \eta_x(\boldsymbol{x})}{\partial x}|
   },
   \frac{
   \frac{\partial\eta_z(\boldsymbol{x}, t)}{\partial y}
   }{
-  1 + \frac{\partial \eta_y(\boldsymbol{x})}{\partial y}
+  |1 + \frac{\partial \eta_y(\boldsymbol{x})}{\partial y}|
   }
   \right]
 \end{align*}$$
@@ -260,18 +285,46 @@ float theta = atan2(k.y, k.x);
 ```
 All other parameters required for the spectrum calculation should be provided in some buffer.
 With those values in tow, the initial spectrum can be computed.
-We can generate the random variate using the box-muller method.
-Once this is done, the only thing left is to store it.
-For this we just need two textures, preferably R16G16B16A16 and R16, to hold the generated data.
-The first texture contains the initial spectrum in the RG-channel and the wavevector $$\hat{k}$$ in the BA-channel.
-The second texture contains the angular frequency.
+```cpp
+float omega = dispersion(wavenumber);
+float omega_ddk = dispersion_derivative(wavenumber);
+float non_directional_spectrum = spectrum(wavenumber);
+float directional_spreading = directional_spreading_function(wavenumber, theta);
+float spectrum = sqrt(2.0 * non_directional_spectrum * directional_spreading * abs(omega_ddk / wavenumber) * dk * dk);
 
-An important note: the Nyquist-Shannon sampling theorem lets us derive the minimum and maximum wavenumber that we can use without losing information.
+float amplitude = random_gaussian(rng); // Box-Muller or similar
+float phase = TWO_PI * random_uniform(rng);
+float2 variate = amplitude * complex_from_polar(phase);
+
+float2 initial_spectrum = variate * spectrum;
+```
+A very important note: make sure that your random number generator works properly.
+You can easily check this by looking at the initial spectrum texture in your favorite graphics debugging tool.
+If there are any patterns to be found, chances are that the result after the FFT will look very off, like having a single consistent sine wave across the entire plane.
+*Not to say that this ever happened to me or that it took quite a few hours to find out what caused this bug.*
+Anyhow, continuing with the implementation.
+
+The Nyquist-Shannon sampling theorem lets us derive the minimum and maximum wavenumber that we can use without losing information.
 Those values are: $$\pi/L \leq \texttt{wavenumber} \leq \pi\cdot N/L$$.
-Whilst the upper bound may be raised for artistic purposes, the lower bound is required.
+Whilst the upper bound may be raised or ignored for artistic purposes, the lower bound is required.
+Ignoring the division by 0 that we'd get, having a non-zero value in the zeroth frequency bucket just adds to every other value in the Fourier transform, or in other words, it moves everything by the same amount.
 In case that the wavenumber is below the bound, simply set all corresponding values to 0.
+```cpp
+if (wavenumber < PI * L)
+{
+  initial_spectrum = 0.0;
+  k = 0.0;
+  omega = 0.0;
+}
+```
 
-This compute shader only needs to be exceuted once, so using more elaborate spectra won't impact performance.
+Once this is done, the only thing left is to store it.
+For this we just need two textures, preferably R16G16B16A16 and R16.
+The first texture contains the initial spectrum in the RG-channel and the wavevector $$\hat{k}$$ in the BA-channel.
+The second texture contains the angular frequency $$\omega$$.
+
+This compute shader only needs to be exceuted once per parameter change, so using more elaborate spectra won't impact performance.
+However, it itself is pretty cheap to compute so keeping it active won't really hurt either, though for production it should definitely only run if necessary.
 
 **Time-Dependent Spectrum**:\\
 Moving on, in a different compute shader we'll now compute the time-dependent spectrum $$\tilde{h}(\hat{k}, t)$$.
@@ -279,18 +332,28 @@ To get the required value $$\tilde{h}_0(-\hat{k})$$, the value from the initial 
 ```cpp
 float4 spectrum_k = initial_spectrum[id.xy];
 float2 spectrum = spectrum_k.xy;
+float2 k = spectrum_k.zw;
+float rcp_wavenumber = rcp(max(0.001, length(k)));
 float2 spectrum_minus_k = conjugate(initial_spectrum[(N-id)%N].xy);
 ```
-Once $$\tilde{h}(\hat{k}, t)$$ is computed, we can make use of the Hermitian property and pack two results into a single complex value.
+The next step is to develop the spectrum over time, meaning to calculate $$\tilde{h}(\hat{k}, t)$$.
+This is easily done:
+```cpp
+float omega = omega_texture[id.xy];
+float2 arg = complex_from_polar(t * omega);
+float2 h = cmul(spectrum, arg) + cmul(spectrum_minus_k, cconjugate(arg));
+float2 ih = cmuli(h);
+```
+Now that $$\tilde{h}(\hat{k}, t)$$ is computed, we can compute all the spectral values we need and then make use of the Hermitian property and pack two results into a single complex value.
 In my implementation, I've decided on the following packing:
 ```cpp
-float2 x    =  ih * k.x / wavenumber;
-float2 y    =  ih * k.y / wavenumber;
+float2 x    =  ih * k.x * rcp_wavenumber;
+float2 y    =  ih * k.y * rcp_wavenumber;
 float2 z    =   h;
-float2 xdx  = - h * k.x * k.x / wavenumber;
-float2 ydx  = - h * k.y * k.x / wavenumber;
+float2 xdx  = - h * k.x * k.x * rcp_wavenumber;
+float2 ydx  = - h * k.y * k.x * rcp_wavenumber;
 float2 zdx  =  ih * k.x;
-float2 ydy  = - h * k.y * k.y / wavenumber;
+float2 ydy  = - h * k.y * k.y * rcp_wavenumber;
 float2 zdy  =  ih * k.y;
 
 float4 a = float4(x + cmuli(y), z + cmuli(xdx));
@@ -303,16 +366,47 @@ uint2 shifted_pos = (id.xy + N/2) % pc.texture_size;
 Once the values are stored into two separate 4-channel floating point textures, they can be sent off into the FFT compute shader and then be used for rendering.
 But given that this blog post is already quite long, a proper segment on rendering will have to wait for a while.
 
-A small note on the computation of $$\tilde{h}(\hat{k}, t)$$:
-\[Horvath 2015\] mentions that the method used by Tessendorf is problematic because the waves travelling opposite have a different spectrum associated with them and thus need to be handled separately.
+A small note on $$\tilde{h}_0(-\hat{k})$$:
+\[Horvath 2015\] mentions that the method used by Tessendorf, which I am also using here, is problematic because the waves travelling opposite have a different spectrum associated with them and thus need to be handled separately.
 In their implementation they're storing two versions of the initial spectrum, one for the positive and one for the negative part.
 This is an improvement that I still have to add in my implementation.
+
+**Fast Fourier Transform**:\\
+As for the FFT itself, my HLSL implementation can be found [here](https://github.com/rtryan98/renderer/blob/231037ba920f71a37f0e598dd7ec520f688fda74/assets/shaders/fft.cs.hlsl).
+You should be able to just copy it and just change up some bindings and includes, as well as the defines.
+To use it, just call your API's `dispatch(1, texture_size, 1)`.
+On top of that, operates in-place, so no additional textures are required for it.
+It's plenty fast enough so it doesn't cost too much frame time, though I am sure that some improvements could still be made.
+
+If you decide to roll your own FFT implementation, the simplest way to check if it is accurate is to test if the identity transform, that is, the result of the inverse Fourier transform of the Fourier transform of some texture is the same.
 
 **Sampling**:\\
 Once the displacement and the partial derivatives are computed, the textures contain the values normalized in regard to the lengthscale used.
 Meaning that to get the displacement and the partial derivatives of any point $$\boldsymbol{x}$$ on the horizontal plane in world space, all that is needed is to divide the position by the lengthscale to get the UV coordinate for sampling.
 For the vertex shader, all that is required then is to add the displacement to the position.
+```cpp
+float2 uv = world_position.xy / L;
+float3 displacement = x_y_z_xdx.sample(uv).xyz;
+world_position += displacement;
+```
 In the pixel shader, we still need the $$\partial \eta_x(\boldsymbol{x})/\partial x$$ value, meaning we have to sample both textures per invocation.
+```cpp
+float4 derivatives = ydx_zdx_ydy_zdy.sample(uv);
+float xdx = x_y_z_xdx.sample(uv).w;
+float y_dx = ydx_zdx_ydy_zdy.x;
+float z_dx = ydx_zdx_ydy_zdy.y;
+float y_dy = ydx_zdx_ydy_zdy.z;
+float z_dy = ydx_zdx_ydy_zdy.w;
+
+float2 slope = calculate_slope(z_dx, z_dy, x_dx, y_dy);
+float3 normal = normalize(float3(slope, 1.0));
+float jacobian = calculate_jacobian(x_dx, y_dx, y_dx, y_dy);
+
+// foam example
+float foam_factor = jacobian < bias ? 1.0 : 0.0;
+```
+A small note on the slope calculation: the derivatives may be exactly -1, causing a singularity.
+Simply clamping the divisor to always be above some epsilon should be enough whilst being barely noticeable.
 
 #### Cascades
 One last thing.
@@ -321,12 +415,23 @@ This also means that the tiling will be extremely noticeable.
 A remedy for this is to make use of cascades, which luckily is a simple modification.
 To make use of cascades, the textures should be replaced with a texture array.
 Then for every layer, the entire simulation pipeline will be executed with the only difference being the parameter $$L$$.
+To reduce tiling, $$L$$ should optimally be picked with some relation to the golden ratio.
+If a common factor for any two values of $$L$$ exists, then the tiling will be visible.
 Overlap between the cascades should also be prevented.
 This can be done by picking a hard limit which is calculated by either the previous cascade's largest wavenumber or the succeeding cascade's smallest wavenumber.
 Alternatively, instead of using a hard limit the spectral amplitude in the cascade may be weighted based on the amount of cascades that operate in the same range.
 I've tested both methods and decided for the latter one.
 In my implementation I've limited the amount of cascades to 4.
 Whilst every cascade provides an extra layer of detail, it also adds another texture sample that is required when rendering, which will put a lot more pressure on the GPU.
+Using cascades requires a small modification to the sampling:
+```cpp
+T sampled_value = 0.0;
+for (cascade = 0; cascade < max_cascade; ++cascade)
+{
+  float cascade_uv = starting_world_position / L[cascade];
+  sampled_value += texture.sample(cascade_uv);
+}
+```
 
 ## Result
 Whilst this blog post won't automatically give you an ocean simulation implementation that is fully production ready, I hope it'll at least give you something to build upon.
@@ -349,6 +454,10 @@ Because of this, the next part will concern itself with scaling the ocean up and
 After that I'd like to improve the visuals of the ocean shading, using Bruneton's Ocean BRDF or the bio-optical extension to it.
 Outside of that, another interesting area is implementing proper ocean-terrain boundary interaction.
 [\[Jeschke et al.\] Making Procedural Water Waves Boundary-aware](https://pub.ista.ac.at/~chafner/JeschkeWaveCages.pdf) shows a method of doing exactly that.
+
+A smaller modification that I am also missing is the addition of a so-called swell factor, which \[Horvath 2015\] introduced.
+The swell factor is constructed as a modification of the Mitsuyasu or Hasselmann directional spreading functions and modifies the spectrum in a way to control how elongated the waves are.
+In [Arc Blanc: a real time ocean simulation framework](https://jcgt.org/published/0014/01/05/paper.pdf) the modification is shown for the Donelan-Banner directional spreading function, using a Lagrange polynomial to approximate the normalization factor $$Q_\text{Donelan-Banner}$$.
 
 ## Sources
 - [\[Gamper 2018\] Ocean Surface Generation and Rendering](https://www.cg.tuwien.ac.at/research/publications/2018/GAMPER-2018-OSG/GAMPER-2018-OSG-thesis.pdf)
