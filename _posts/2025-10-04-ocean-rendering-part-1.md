@@ -236,7 +236,7 @@ $$\boldsymbol{s}(\boldsymbol{x}) = (\partial\eta_z/\partial x, \partial\eta_z/\p
 
 Using this, the normal is easily calculated:
 
-$$\boldsymbol{N}(\boldsymbol{x}) = \text{normalize}(\boldsymbol{s}(\boldsymbol{x})_x, \boldsymbol{s}(\boldsymbol{x})_y, 1)$$
+$$\boldsymbol{N}(\boldsymbol{x}) = \text{normalize}(-\boldsymbol{s}(\boldsymbol{x})_x, -\boldsymbol{s}(\boldsymbol{x})_y, 1)$$
 
 However, doing so means that the normal vectors ignore the horizontal displacement.
 Because of this, the slope calculation needs to be modified accordingly to also consider the horizontal displacement at a given point, giving us the following definition:
