@@ -310,7 +310,7 @@ Whilst the upper bound may be raised or ignored for artistic purposes, the lower
 Ignoring the division by 0 that we'd get, having a non-zero value in the zeroth frequency bucket just adds to every other value in the Fourier transform, or in other words, it moves everything by the same amount.
 In case that the wavenumber is below the bound, simply set all corresponding values to 0.
 ```cpp
-if (wavenumber < PI * L)
+if (wavenumber < PI / L)
 {
   initial_spectrum = 0.0;
   k = 0.0;
