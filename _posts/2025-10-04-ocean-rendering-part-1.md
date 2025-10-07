@@ -71,7 +71,7 @@ The next chapters will go over some theory and the mathematics required to imple
 A small list of the parameters and their notation that'll be used in here:
 - $$F$$: Fetch, the distance from the lee shore, dimensionless, but can be thought of as kilometers.
 - $$h$$: Ocean depth, in meters.
-- $$g$$: Gravitational constant, in meters per second squared (Value of $$9.81$$).
+- $$g$$: Surface gravity, in meters per second squared (Value of $$9.81$$).
 - $$U$$: Average wind speed (at 10 meters above sea level), in meters per second.
 - $$\rho$$: Density of water, in kilograms per cubic meter. (Value of $$1000$$ is used)
 - $$\sigma$$: Surface tension coefficient, in Newtons. (Value of $$0.072$$ is used)
