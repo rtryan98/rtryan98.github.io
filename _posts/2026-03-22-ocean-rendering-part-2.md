@@ -25,15 +25,15 @@ Continuing the ocean rendering journey by improving performance.
 ## Introduction
 Before optimizing it is important to construct a benchmark for consistency and create a baseline to optimize against.
 The camera is in a fixed position and time is stopped.
-All captures are taken at a resolution of 1440p with clocks locked to boost on an RTX 4070.
+All captures were taken at a resolution of 1440p with clocks locked to boost on an RTX 4070.
 
 ## Baseline
-The ocean simulation is set to use four cascades, with each cascade generating two 256x256 `R32G32B32A32` textures, representing the displacement and the five partial derivatives required for shading, which were discussed in the first part.
+The ocean simulation is set to use four cascades, with each cascade generating two 256x256 `R32G32B32A32` textures, representing the 3D displacement and the five partial derivatives required for shading.
 The rendering is split into a depth pre-pass and the shading pass, the latter being referred as an opaque pass in the captures.
 A single tile with 2048x2048 vertices is drawn with a distance of 0.25 between every vertex, and there is neither a vertex buffer nor an index buffer -- the tile is generated in the vertex shader based on the drawcall information.
 Each vertex requires up to four texture samples for the displacement, and each fragment in the pixel shader needs to sample both displacement and partial derivative textures due to how the values are packed.
 The current optimizations are limited to a very simple distance-based weight calculated for each cascade, with a weight of 0.0 disabling the texture sample of the cascade.
-This being said, here's the baseline capture:
+Now that the current implementation is explained, here's the baseline capture:
 
 <div class="card mb-3">
     <img class="card-img-top" src="https://raw.githubusercontent.com/rtryan98/rtryan98.github.io/refs/heads/main/_posts/ocean-rendering-part-2/nsight_fp32.png"/>
@@ -70,7 +70,8 @@ The first things we can see when inspecting the capture is that L1TEX throughput
 This being said, we're L1TEX bound and thus removing pressure there should help us gain significant speed increases.
 
 ## Optimization 1: FP16 Textures
-Simply changing the texture formats from the simulation to `R16G16B16A16` should help a lot without taking too many compromises in the quality.
+Starting out with a simple optimization.
+Changing the texture formats from the simulation to `R16G16B16A16` should help a lot without causing a loss in quality.
 
 <div class="card mb-3">
     <img class="card-img-top" src="https://raw.githubusercontent.com/rtryan98/rtryan98.github.io/refs/heads/main/_posts/ocean-rendering-part-2/nsight_fp16.png"/>
@@ -110,7 +111,7 @@ This leaves the PES+VPC unit.
 Because there aren't any tesselation or geometry shaders to be found anywhere in this renderer, the only candidate left is VPC, which is responsible for clip and cull.
 
 ## Optimization 2: Coarse Culling
-Because every vertex needs to sample the displacement for every cascade, reducing the amount of geometry processing should alleviate some L1TEX pressure and potentially some VPC pressure.
+Every vertex needs to sample the displacement for every cascade, thus reducing the amount of geometry processing should alleviate some L1TEX pressure and potentially some VPC pressure.
 The obvious first step to reduce overhead incurred by geometry processing is to reduce the amount of geometry that is processed in the first place.
 Starting simple, The ocean surface is split into a 16x16 grid of tiles with 128x128 vertices each.
 Each tile will go through CPU-based frustum culling, with an arbitrary grace factor to account for displacement beyond the tile-boundaries.
@@ -147,13 +148,15 @@ Each tile will go through CPU-based frustum culling, with an arbitrary grace fac
 </table>
 
 Surprisingly, instead of improving performance, it got slower.
-Interesting is the wave-like shape that now appears in both the depth pre pass and the shading pass.
-The World Pipe bottleneck now also seems to be more apparent than before, with L1TEX being reduced drastically in both passes.
+An interesting wave-like shape now appears in both the depth pre pass and the shading pass.
+The World Pipe bottleneck also seems to be more apparent than before, with L1TEX being reduced drastically in both passes.
 
 ## Optimization 3: Index Buffer
 Without an index buffer the GPU cannot assume that any vertex is reused, so for every vertex, every triangle that touches it samples the textures again despite the data not changing.
 Given the structure of the grid, every vertex position has its displacement sampled up to 6 times.
 Using an index buffer should allow the GPU to re-use most of the vertices so long as the vertex cache isn't full, leading to a large reduction in texture samples in the vertex shader.
+A vertex buffer is not required to allow for this re-use.
+My implementation here simply goes from quad to quad across all rows and columns in the grid, giving us the following capture:
 
 <div class="card mb-3">
     <img class="card-img-top" src="https://raw.githubusercontent.com/rtryan98/rtryan98.github.io/refs/heads/main/_posts/ocean-rendering-part-2/nsight_index_buffer.png"/>
@@ -189,7 +192,7 @@ Using an index buffer should allow the GPU to re-use most of the vertices so lon
 The reduction in throughput across most units as well as the improved timings prove that the index buffer helped.
 
 ## Optimization 4: Z-Curve Index Buffer
-Reordering the indices to maximize locality and thus minimizing the amount of repeated texture samples will further improve the vertex cache utilization.
+Further reordering the indices to maximize locality and thus minimizing the amount of repeated texture samples will further improve the vertex cache utilization.
 One way of doing so is by ordering the vertices to be accessed in a Z-curve.
 
 <div class="card mb-3">
@@ -318,7 +321,9 @@ This also highly correlates with the improvement in occupancy, where in previous
 
 ## Summary
 With the LOD system implemented, I'm quite happy with the current results and excited to keep improving the ocean rendering.
-Concluding this optimization journey, here's a table that compares all steps:
+Most interesting to me during this optimization process was noticing how something that theoretically improves the algorithm can result in little to no change at all simply due to another issue dwarfing it.
+This doesn't mean that Step 5 wasn't useful, but I have to admit that I've done no capture with that specific optimization removed to see if it actually causes a meaningful difference.
+Finally concluding this optimization journey, here's a table that compares all steps:
 
 <table class="table" >
   <thead>
