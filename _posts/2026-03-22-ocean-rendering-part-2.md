@@ -28,7 +28,7 @@ The camera is in a fixed position and time is stopped.
 All captures are taken at a resolution of 1440p with clocks locked to boost on an RTX 4070.
 
 ## Baseline
-The ocean simulation is set to use four cascades, with each cascade generating two 256x256 R32G32B32A32 textures, representing the displacement and the five partial derivatives required for shading, which were discussed in the first part.
+The ocean simulation is set to use four cascades, with each cascade generating two 256x256 `R32G32B32A32` textures, representing the displacement and the five partial derivatives required for shading, which were discussed in the first part.
 The rendering is split into a depth pre-pass and the shading pass, the latter being referred as an opaque pass in the captures.
 A single tile with 2048x2048 vertices is drawn with a distance of 0.25 between every vertex, and there is neither a vertex buffer nor an index buffer -- the tile is generated in the vertex shader based on the drawcall information.
 Each vertex requires up to four texture samples for the displacement, and each fragment in the pixel shader needs to sample both displacement and partial derivative textures due to how the values are packed.
@@ -49,18 +49,8 @@ This being said, here's the baseline capture:
   </thead>
   <tbody>
     <tr>
-      <th scope="row">Initial Spectrum</th>
-      <td>0.04ms</td>
-      <td>0.04ms</td>
-    </tr>
-    <tr>
-      <th scope="row">Time Dependent Spectrum</th>
-      <td>0.01ms</td>
-      <td>0.05ms</td>
-    </tr>
-    <tr>
-      <th scope="row">IFFT</th>
-      <td>0.06ms</td>
+      <th scope="row">Simulation</th>
+      <td>0.11ms</td>
       <td>0.11ms</td>
     </tr>
     <tr>
@@ -76,11 +66,11 @@ This being said, here's the baseline capture:
   </tbody>
 </table>
 
-The first things we can see when inspecting the capture is that L1TEX throughput is through the roof as well as occupancy being extremely low for both rendering passes.
+The first things we can see when inspecting the capture is that L1TEX throughput is through the roof as well as occupancy being extremely low for both shading passes.
 This being said, we're L1TEX bound and thus removing pressure there should help us gain significant speed increases.
 
 ## Optimization 1: FP16 Textures
-Simply changing the texture formats from the simulation to R16G16B16A16 should help a lot without taking too many compromises in the quality.
+Simply changing the texture formats from the simulation to `R16G16B16A16` should help a lot without taking too many compromises in the quality.
 
 <div class="card mb-3">
     <img class="card-img-top" src="https://raw.githubusercontent.com/rtryan98/rtryan98.github.io/refs/heads/main/_posts/ocean-rendering-part-2/nsight_fp16.png"/>
@@ -96,18 +86,8 @@ Simply changing the texture formats from the simulation to R16G16B16A16 should h
   </thead>
   <tbody>
     <tr>
-      <th scope="row">Initial Spectrum</th>
-      <td>0.03ms</td>
-      <td>0.03ms</td>
-    </tr>
-    <tr>
-      <th scope="row">Time Dependent Spectrum</th>
-      <td>0.01ms</td>
-      <td>0.04ms</td>
-    </tr>
-    <tr>
-      <th scope="row">IFFT</th>
-      <td>0.04ms</td>
+      <th scope="row">Simulation</th>
+      <td>0.08ms</td>
       <td>0.08ms</td>
     </tr>
     <tr>
@@ -149,18 +129,8 @@ Each tile will go through CPU-based frustum culling, with an arbitrary grace fac
   </thead>
   <tbody>
     <tr>
-      <th scope="row">Initial Spectrum</th>
-      <td>0.04ms</td>
-      <td>0.04ms</td>
-    </tr>
-    <tr>
-      <th scope="row">Time Dependent Spectrum</th>
-      <td>0.01ms</td>
-      <td>0.05ms</td>
-    </tr>
-    <tr>
-      <th scope="row">IFFT</th>
-      <td>0.04ms</td>
+      <th scope="row">Simulation</th>
+      <td>0.09ms</td>
       <td>0.09ms</td>
     </tr>
     <tr>
@@ -199,18 +169,8 @@ Using an index buffer should allow the GPU to re-use most of the vertices so lon
   </thead>
   <tbody>
     <tr>
-      <th scope="row">Initial Spectrum</th>
-      <td>0.04ms</td>
-      <td>0.04ms</td>
-    </tr>
-    <tr>
-      <th scope="row">Time Dependent Spectrum</th>
-      <td>0.01ms</td>
-      <td>0.05ms</td>
-    </tr>
-    <tr>
-      <th scope="row">IFFT</th>
-      <td>0.04ms</td>
+      <th scope="row">Simulation</th>
+      <td>0.09ms</td>
       <td>0.09ms</td>
     </tr>
     <tr>
@@ -246,18 +206,8 @@ One way of doing so is by ordering the vertices to be accessed in a Z-curve.
   </thead>
   <tbody>
     <tr>
-      <th scope="row">Initial Spectrum</th>
-      <td>0.03ms</td>
-      <td>0.03ms</td>
-    </tr>
-    <tr>
-      <th scope="row">Time Dependent Spectrum</th>
-      <td>0.01ms</td>
-      <td>0.04ms</td>
-    </tr>
-    <tr>
-      <th scope="row">IFFT</th>
-      <td>0.04ms</td>
+      <th scope="row">Simulation</th>
+      <td>0.08ms</td>
       <td>0.08ms</td>
     </tr>
     <tr>
@@ -277,8 +227,9 @@ As can be seen in the capture and the timings, World Pipe throughput has been re
 
 ## Optimization 5: Texture Repacking and Quantization
 Considering the huge amount of texture samples required and following the logic when going to fp16, further reducing the size of textures should still help improve performance.
-The IFFT now has an additional dispatch that calculates the min/max values from the output.
-That dispatch, according to the capture, takes rougly 1 microsecond, so it's fully insignificant, which is why I'll omit it from the table.
+The IFFT now has an additional dispatch that calculates the min/max values from the output, which is used to quantize the results into a reordered set of textures: `R8G8B8A8` displacement, `R8` and `R8G8B8A8` for the partial derivatives.
+That extra dispatch takes roughly 1 microsecond, so I'll omit it from the measurements.
+The repacking removes the unnecessary displacement samples from the pixel shader.
 
 <div class="card mb-3">
     <img class="card-img-top" src="https://raw.githubusercontent.com/rtryan98/rtryan98.github.io/refs/heads/main/_posts/ocean-rendering-part-2/nsight_texture_packing.png"/>
@@ -294,18 +245,8 @@ That dispatch, according to the capture, takes rougly 1 microsecond, so it's ful
   </thead>
   <tbody>
     <tr>
-      <th scope="row">Initial Spectrum</th>
-      <td>0.03ms</td>
-      <td>0.03ms</td>
-    </tr>
-    <tr>
-      <th scope="row">Time Dependent Spectrum</th>
-      <td>0.01ms</td>
-      <td>0.04ms</td>
-    </tr>
-    <tr>
-      <th scope="row">IFFT</th>
-      <td>0.05ms</td>
+      <th scope="row">Simulation</th>
+      <td>0.09ms</td>
       <td>0.09ms</td>
     </tr>
     <tr>
@@ -350,18 +291,8 @@ For future work I'll likely implement Jonathan Dupuy's Concurrent Binary Tree da
   </thead>
   <tbody>
     <tr>
-      <th scope="row">Initial Spectrum</th>
-      <td>0.03ms</td>
-      <td>0.03ms</td>
-    </tr>
-    <tr>
-      <th scope="row">Time Dependent Spectrum</th>
-      <td>0.01ms</td>
-      <td>0.04ms</td>
-    </tr>
-    <tr>
-      <th scope="row">IFFT</th>
-      <td>0.04ms</td>
+      <th scope="row">Simulation</th>
+      <td>0.08ms</td>
       <td>0.08ms</td>
     </tr>
     <tr>
