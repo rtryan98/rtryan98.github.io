@@ -28,6 +28,8 @@ include: ["_pages", "_portfolio"]
 sass:
   sass_dir: theme/_sass
   style: compressed
+  quiet_deps: true
+  silence_deprecations: ["import"]
 
 # Turn the projects into a collection.
 collections:
