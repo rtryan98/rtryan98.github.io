@@ -11,6 +11,8 @@ In this post I will go through the theory and mathematics of implementing an oce
 
 <!--more-->
 
+Navigation: \[Part 1\] [\[Part 2\]](../../../2026/03/22/ocean-rendering-part-2.html)
+
 ## Chapters
 - [Introduction](#introduction)
   - [Algorithm Walkthrough](#algorithm-walkthrough)

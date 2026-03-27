@@ -6,10 +6,11 @@ tags:
   - Ocean
 pin: true
 ---
-
 Continuing the ocean rendering journey by improving performance.
 
 <!--more-->
+
+Navigation: [\[Part 1\]](../../../2025/10/04/ocean-rendering-part-1.html) \[Part 2\]
 
 ## Chapters
 - [Introduction](#introduction)
@@ -28,11 +29,12 @@ The camera is in a fixed position and time is stopped.
 All captures were taken at a resolution of 1440p with clocks locked to boost on an RTX 4070.
 
 ## Baseline
-The ocean simulation is set to use four cascades, with each cascade generating two 256x256 `R32G32B32A32` textures, representing the 3D displacement and the five partial derivatives required for shading.
+The ocean simulation is set to use four cascades (simulation domains), with each cascade generating two 256x256 `R32G32B32A32` textures, representing the 3D displacement and the five partial derivatives required for shading.
 The rendering is split into a depth pre-pass and the shading pass, the latter being referred as an opaque pass in the captures.
+The depth pre-pass was implemented in preparation to implementing translucency, in hindsight, however, it also was an optimization.
 A single tile with 2048x2048 vertices is drawn with a distance of 0.25 between every vertex, and there is neither a vertex buffer nor an index buffer -- the tile is generated in the vertex shader based on the drawcall information.
 Each vertex requires up to four texture samples for the displacement, and each fragment in the pixel shader needs to sample both displacement and partial derivative textures due to how the values are packed.
-The current optimizations are limited to a very simple distance-based weight calculated for each cascade, with a weight of 0.0 disabling the texture sample of the cascade.
+I have also implemented a very simple distance-based weight calculated for each cascade, with a weight of 0.0 disabling the texture sample of the cascade.
 Now that the current implementation is explained, here's the baseline capture:
 
 <div class="card mb-3">
@@ -104,7 +106,7 @@ Changing the texture formats from the simulation to `R16G16B16A16` should help a
   </tbody>
 </table>
 
-To absolutely no one's surprice, reducing the texture size and thus reducing the bandwidth makes quite a significant impact in frame time, reducing it by 1.27ms across the depth pre pass and shading pass combined!
+To absolutely no one's surprise, reducing the texture size and thus reducing the bandwidth makes quite a significant impact in frame time, reducing it by 1.27ms across the depth pre pass and shading pass combined!
 What's interesting now is that there are sections in which the limiting factor is World Pipe throughput.
 Given that neither vertex nor index buffers are used, the Primitive Distributor (PD) and Vertex Attribute Fetch (VAF) units aren't the culprits.
 This leaves the PES+VPC unit.
@@ -230,7 +232,7 @@ As can be seen in the capture and the timings, World Pipe throughput has been re
 
 ## Optimization 5: Texture Repacking and Quantization
 Considering the huge amount of texture samples required and following the logic when going to fp16, further reducing the size of textures should still help improve performance.
-The IFFT now has an additional dispatch that calculates the min/max values from the output, which is used to quantize the results into a reordered set of textures: `R8G8B8A8` displacement, `R8` and `R8G8B8A8` for the partial derivatives.
+There is now an additional dispatch that calculates the min/max values from the initial simulation output, which is used to quantize the results into a reordered set of textures: `R8G8B8A8` displacement, `R8` and `R8G8B8A8` for the partial derivatives.
 That extra dispatch takes roughly 1 microsecond, so I'll omit it from the measurements.
 The repacking removes the unnecessary displacement samples from the pixel shader.
 
@@ -279,6 +281,14 @@ Now to the elephant in the room, which I will name "LOD system".
 Up until now, the ocean tiles all had the same size and thus also the same scale.
 Implementing a simple CPU-based LOD system will help in many ways: reducing quad-overdraw, reducing vertex shader texture samples, and further reducing VPC pressure -- and in return, vastly improve occupancy.
 For future work I'll likely implement Jonathan Dupuy's Concurrent Binary Tree data structure, as it would be quite a perfect fit for the ocean.
+
+<div class="card mb-3">
+    <img class="card-img-top" src="https://raw.githubusercontent.com/rtryan98/rtryan98.github.io/refs/heads/main/_posts/ocean-rendering-part-2/culling.png"/>
+</div>
+
+<div class="card mb-3">
+    <img class="card-img-top" src="https://raw.githubusercontent.com/rtryan98/rtryan98.github.io/refs/heads/main/_posts/ocean-rendering-part-2/lod.png"/>
+</div>
 
 <div class="card mb-3">
     <img class="card-img-top" src="https://raw.githubusercontent.com/rtryan98/rtryan98.github.io/refs/heads/main/_posts/ocean-rendering-part-2/nsight_lod.png"/>
